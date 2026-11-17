@@ -4,6 +4,9 @@ package com.servicedesk.servicedesk_backend.ticket.controller;
 
 import com.servicedesk.servicedesk_backend.ticket.TicketService;
 
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
+
 import com.servicedesk.servicedesk_backend.ticket.dto.TicketAssignRequest;
 import com.servicedesk.servicedesk_backend.ticket.dto.TicketResponse;
 
@@ -32,22 +35,32 @@ public class AdminTicketController {
 
     // STEP 5: ASSIGN TICKET TO AGENT
 
+// STEP 5: ASSIGN TICKET TO AGENT
+
     @PatchMapping("/{ticketId}/assignment")
     public ResponseEntity<TicketResponse> assignTicket(
 
             @PathVariable Long ticketId,
 
-            @Valid @RequestBody TicketAssignRequest request
+            @Valid @RequestBody TicketAssignRequest request,
+
+            @AuthenticationPrincipal UserDetails userDetails
     ) {
 
-        // STEP 5.1: CALL SERVICE TO ASSIGN TICKET
+        // STEP 5.1: GET LOGGED-IN ADMIN EMAIL
+        String adminEmail = userDetails.getUsername();
+
+
+        // STEP 5.2: CALL SERVICE TO ASSIGN TICKET
+        // Pass ticket ID, admin email and assignment request.
         TicketResponse response = ticketService.assignTicket(
                 ticketId,
+                adminEmail,
                 request
         );
 
 
-        // STEP 5.2: RETURN UPDATED TICKET
+        // STEP 5.3: RETURN UPDATED TICKET
         return ResponseEntity.ok(response);
     }
 

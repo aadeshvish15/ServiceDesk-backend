@@ -1,6 +1,9 @@
 package com.servicedesk.servicedesk_backend.ticket;
 
 // STEP 1: IMPORT REQUIRED CLASSES
+import com.servicedesk.servicedesk_backend.activity.ActivityAction;
+import com.servicedesk.servicedesk_backend.activity.ActivityService;
+import com.servicedesk.servicedesk_backend.activity.ActivityVisibility;
 
 import com.servicedesk.servicedesk_backend.category.Category;
 import com.servicedesk.servicedesk_backend.category.CategoryRepository;
@@ -30,7 +33,7 @@ import java.util.List;
 public class TicketService {
 
     // STEP 3: INJECT REQUIRED REPOSITORIES
-
+    private final ActivityService activityService;
     private final TicketRepository ticketRepository;
 
     private final UserRepository userRepository;
@@ -43,12 +46,14 @@ public class TicketService {
     public TicketService(
             TicketRepository ticketRepository,
             UserRepository userRepository,
-            CategoryRepository categoryRepository
+            CategoryRepository categoryRepository,
+            ActivityService activityService
     ) {
 
         this.ticketRepository = ticketRepository;
         this.userRepository = userRepository;
         this.categoryRepository = categoryRepository;
+        this.activityService = activityService;
     }
 
 
@@ -90,7 +95,15 @@ public class TicketService {
         // STEP 5.4: SAVE TICKET IN DATABASE
 
         Ticket savedTicket = ticketRepository.save(ticket);
+        // STEP: RECORD TICKET CREATION ACTIVITY
 
+        activityService.recordActivity(
+                savedTicket,
+                employee,
+                ActivityAction.TICKET_CREATED,
+                "Ticket created",
+                ActivityVisibility.PUBLIC
+        );
 
         // STEP 5.5: CONVERT ENTITY INTO RESPONSE DTO
 
@@ -201,16 +214,32 @@ public class TicketService {
 
     // STEP 11: ASSIGN TICKET TO AN AGENT
 
+// STEP: ASSIGN TICKET TO AGENT AND RECORD ACTIVITY
+
     public TicketResponse assignTicket(
             Long ticketId,
+            String adminEmail,
             TicketAssignRequest request
     ) {
 
-        // STEP 11.1: FIND TICKET
+        // STEP 1: FIND ADMIN WHO IS PERFORMING THE ASSIGNMENT
+        User admin = findEnabledUserByEmail(adminEmail);
+
+
+        // STEP 2: VERIFY ADMIN ROLE
+        if (admin.getRole() != Role.ADMIN) {
+
+            throw new AccessDeniedException(
+                    "Only admins can assign tickets"
+            );
+        }
+
+
+        // STEP 3: FIND TICKET
         Ticket ticket = findTicketById(ticketId);
 
 
-        // STEP 11.2: FIND THE REQUESTED AGENT
+        // STEP 4: FIND REQUESTED AGENT
         User agent = userRepository
                 .findById(request.agentId())
                 .orElseThrow(() -> new ResourceNotFoundException(
@@ -218,8 +247,7 @@ public class TicketService {
                 ));
 
 
-        // STEP 11.3: VERIFY THAT THE SELECTED USER IS AN ACTIVE AGENT
-
+        // STEP 5: VERIFY AGENT ROLE AND ACCOUNT STATUS
         if (agent.getRole() != Role.AGENT || !agent.isEnabled()) {
 
             throw new IllegalArgumentException(
@@ -228,15 +256,45 @@ public class TicketService {
         }
 
 
-        // STEP 11.4: ASSIGN TICKET TO AGENT
+        // STEP 6: STORE PREVIOUS ASSIGNED AGENT
+        User previousAgent = ticket.getAssignedTo();
+
+
+        // STEP 7: ASSIGN TICKET
         ticket.assignTo(agent);
 
 
-        // STEP 11.5: SAVE UPDATED TICKET
+        // STEP 8: SAVE UPDATED TICKET
         Ticket updatedTicket = ticketRepository.save(ticket);
 
 
-        // STEP 11.6: RETURN UPDATED TICKET
+        // STEP 9: PREPARE ACTIVITY DESCRIPTION
+        String description;
+
+        if (previousAgent == null) {
+
+            description = "Ticket assigned to " + agent.getName();
+
+        } else {
+
+            description = "Ticket reassigned from "
+                    + previousAgent.getName()
+                    + " to "
+                    + agent.getName();
+        }
+
+
+        // STEP 10: RECORD ASSIGNMENT ACTIVITY
+        activityService.recordActivity(
+                updatedTicket,
+                admin,
+                ActivityAction.TICKET_ASSIGNED,
+                description,
+                ActivityVisibility.PUBLIC
+        );
+
+
+        // STEP 11: RETURN UPDATED TICKET
         return convertToResponse(updatedTicket);
     }
 
