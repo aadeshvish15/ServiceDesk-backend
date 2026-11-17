@@ -19,6 +19,7 @@ import com.servicedesk.servicedesk_backend.user.User;
 import com.servicedesk.servicedesk_backend.user.UserRepository;
 
 import org.springframework.security.access.AccessDeniedException;
+import com.servicedesk.servicedesk_backend.sla.SlaPolicyService;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,6 +40,8 @@ public class TicketService {
     private final UserRepository userRepository;
 
     private final CategoryRepository categoryRepository;
+    // STEP: INJECT SLA POLICY SERVICE
+    private final SlaPolicyService slaPolicyService;
 
 
     // STEP 4: CONSTRUCTOR INJECTION
@@ -47,13 +50,15 @@ public class TicketService {
             TicketRepository ticketRepository,
             UserRepository userRepository,
             CategoryRepository categoryRepository,
-            ActivityService activityService
+            ActivityService activityService,
+            SlaPolicyService slaPolicyService
     ) {
 
         this.ticketRepository = ticketRepository;
         this.userRepository = userRepository;
         this.categoryRepository = categoryRepository;
         this.activityService = activityService;
+        this.slaPolicyService = slaPolicyService;
     }
 
 
@@ -94,7 +99,22 @@ public class TicketService {
 
         // STEP 5.4: SAVE TICKET IN DATABASE
 
+// STEP 5.4: SAVE NEW TICKET
+
+// The first save generates the ticket ID and createdAt timestamp.
         Ticket savedTicket = ticketRepository.save(ticket);
+
+
+// STEP 5.5: APPLY SLA POLICY
+
+// Find the active policy matching this ticket's priority.
+// Calculate first response and resolution deadlines.
+        slaPolicyService.applyPolicyToTicket(savedTicket);
+
+
+// STEP 5.6: SAVE TICKET WITH SLA DEADLINES
+
+        savedTicket = ticketRepository.save(savedTicket);
         // STEP: RECORD TICKET CREATION ACTIVITY
 
         activityService.recordActivity(
@@ -337,17 +357,42 @@ public class TicketService {
         }
 
 
-        // STEP 12.4: UPDATE TICKET STATUS
+        // STEP 12.4: STORE PREVIOUS STATUS
 
-        // Entity checks whether the status transition is valid.
+        TicketStatus previousStatus = ticket.getStatus();
+
+
+// STEP 12.5: UPDATE TICKET STATUS
+
         ticket.updateStatus(request.status());
 
 
-        // STEP 12.5: SAVE UPDATED TICKET
+// STEP 12.6: SAVE UPDATED TICKET
+
         Ticket updatedTicket = ticketRepository.save(ticket);
 
 
-        // STEP 12.6: RETURN UPDATED TICKET
+// STEP 12.7: PREPARE STATUS CHANGE DESCRIPTION
+
+        String description = "Status changed from "
+                + previousStatus
+                + " to "
+                + updatedTicket.getStatus();
+
+
+// STEP 12.8: RECORD STATUS CHANGE ACTIVITY
+
+        activityService.recordActivity(
+                updatedTicket,
+                currentUser,
+                ActivityAction.STATUS_CHANGED,
+                description,
+                ActivityVisibility.PUBLIC
+        );
+
+
+// STEP 12.9: RETURN UPDATED TICKET
+
         return convertToResponse(updatedTicket);
     }
 
@@ -427,7 +472,12 @@ public class TicketService {
 
                 ticket.getUpdatedAt(),
 
-                ticket.getResolvedAt()
+                ticket.getResolvedAt(),
+                ticket.getFirstResponseDueAt(),
+
+                ticket.getFirstRespondedAt(),
+
+                ticket.getResolutionDueAt()
         );
     }
 

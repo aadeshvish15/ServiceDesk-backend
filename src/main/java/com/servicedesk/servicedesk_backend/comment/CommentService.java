@@ -192,7 +192,38 @@ public class CommentService {
                 activityVisibility
         );
 
+// STEP 6.8: CHECK WHETHER THIS IS A PUBLIC AGENT RESPONSE
 
+// Internal notes must not count as first responses.
+// Employee comments must not count as agent responses.
+        if (
+                request.visibility() == CommentVisibility.PUBLIC
+                        && currentUser.getRole() != Role.EMPLOYEE
+        ) {
+
+            // STEP 6.9: RECORD FIRST RESPONSE TIME
+
+            // This method returns true only for the first response.
+            boolean firstResponseRecorded = ticket.recordFirstResponse();
+
+
+            // STEP 6.10: SAVE FIRST RESPONSE TIME AND ACTIVITY
+            if (firstResponseRecorded) {
+
+                // Save actual first-response timestamp in tickets table.
+                ticketRepository.save(ticket);
+
+
+                // Add first-response event to ticket activity history.
+                activityService.recordActivity(
+                        ticket,
+                        currentUser,
+                        ActivityAction.FIRST_RESPONSE_RECORDED,
+                        "First response sent",
+                        ActivityVisibility.PUBLIC
+                );
+            }
+        }
         // STEP 6.8: RETURN COMMENT RESPONSE
         return convertToResponse(savedComment);
     }

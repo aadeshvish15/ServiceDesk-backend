@@ -279,5 +279,66 @@ public class Ticket {
     public LocalDateTime getResolvedAt() {
         return resolvedAt;
     }
+    // STEP 21: DEFINE FIRST RESPONSE DEADLINE
+
+    // The time by which an agent should first respond.
+    @Column(name = "first_response_due_at")
+    private LocalDateTime firstResponseDueAt;
+
+
+// STEP 22: DEFINE RESOLUTION DEADLINE
+
+    // The time by which the ticket should be resolved.
+    @Column(name = "resolution_due_at")
+    private LocalDateTime resolutionDueAt;
+
+
+// STEP 23: STORE ACTUAL FIRST RESPONSE TIME
+
+    // Null until an agent/admin sends the first public response.
+    @Column(name = "first_responded_at")
+    private LocalDateTime firstRespondedAt;
+
+    // STEP 24: SET SLA DEADLINES
+
+    public void setSlaDeadlines(
+            LocalDateTime firstResponseDueAt,
+            LocalDateTime resolutionDueAt
+    ) {
+
+        this.firstResponseDueAt = firstResponseDueAt;
+
+        this.resolutionDueAt = resolutionDueAt;
+    }
+
+    // STEP 25: RECORD FIRST RESPONSE
+
+// Returns true only when this is the first response.
+// Subsequent public comments must not reset the original time.
+
+    public boolean recordFirstResponse() {
+
+        if (this.firstRespondedAt != null) {
+            return false;
+        }
+
+        this.firstRespondedAt = LocalDateTime.now();
+
+        return true;
+    }
+
+    // STEP 26: GET SLA DEADLINES AND FIRST RESPONSE TIME
+
+    public LocalDateTime getFirstResponseDueAt() {
+        return firstResponseDueAt;
+    }
+
+    public LocalDateTime getResolutionDueAt() {
+        return resolutionDueAt;
+    }
+
+    public LocalDateTime getFirstRespondedAt() {
+        return firstRespondedAt;
+    }
 
 }
