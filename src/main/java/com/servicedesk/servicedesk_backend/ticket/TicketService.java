@@ -1,6 +1,7 @@
 package com.servicedesk.servicedesk_backend.ticket;
 
 // STEP 1: IMPORT REQUIRED CLASSES
+
 import com.servicedesk.servicedesk_backend.activity.ActivityAction;
 import com.servicedesk.servicedesk_backend.activity.ActivityService;
 import com.servicedesk.servicedesk_backend.activity.ActivityVisibility;
@@ -8,6 +9,10 @@ import com.servicedesk.servicedesk_backend.activity.ActivityVisibility;
 import com.servicedesk.servicedesk_backend.category.Category;
 import com.servicedesk.servicedesk_backend.category.CategoryRepository;
 import com.servicedesk.servicedesk_backend.category.exception.ResourceNotFoundException;
+
+import com.servicedesk.servicedesk_backend.notification.NotificationService;
+
+import com.servicedesk.servicedesk_backend.sla.SlaPolicyService;
 
 import com.servicedesk.servicedesk_backend.ticket.dto.TicketAssignRequest;
 import com.servicedesk.servicedesk_backend.ticket.dto.TicketCreateRequest;
@@ -19,7 +24,6 @@ import com.servicedesk.servicedesk_backend.user.User;
 import com.servicedesk.servicedesk_backend.user.UserRepository;
 
 import org.springframework.security.access.AccessDeniedException;
-import com.servicedesk.servicedesk_backend.sla.SlaPolicyService;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,15 +37,19 @@ import java.util.List;
 @Transactional
 public class TicketService {
 
-    // STEP 3: INJECT REQUIRED REPOSITORIES
-    private final ActivityService activityService;
+    // STEP 3: INJECT REQUIRED DEPENDENCIES
+
     private final TicketRepository ticketRepository;
 
     private final UserRepository userRepository;
 
     private final CategoryRepository categoryRepository;
-    // STEP: INJECT SLA POLICY SERVICE
+
+    private final ActivityService activityService;
+
     private final SlaPolicyService slaPolicyService;
+
+    private final NotificationService notificationService;
 
 
     // STEP 4: CONSTRUCTOR INJECTION
@@ -51,7 +59,8 @@ public class TicketService {
             UserRepository userRepository,
             CategoryRepository categoryRepository,
             ActivityService activityService,
-            SlaPolicyService slaPolicyService
+            SlaPolicyService slaPolicyService,
+            NotificationService notificationService
     ) {
 
         this.ticketRepository = ticketRepository;
@@ -59,6 +68,7 @@ public class TicketService {
         this.categoryRepository = categoryRepository;
         this.activityService = activityService;
         this.slaPolicyService = slaPolicyService;
+        this.notificationService = notificationService;
     }
 
 
@@ -97,25 +107,25 @@ public class TicketService {
         );
 
 
-        // STEP 5.4: SAVE TICKET IN DATABASE
+        // STEP 5.4: SAVE NEW TICKET
 
-// STEP 5.4: SAVE NEW TICKET
-
-// The first save generates the ticket ID and createdAt timestamp.
+        // The first save generates the ticket ID and createdAt timestamp.
         Ticket savedTicket = ticketRepository.save(ticket);
 
 
-// STEP 5.5: APPLY SLA POLICY
+        // STEP 5.5: APPLY SLA POLICY
 
-// Find the active policy matching this ticket's priority.
-// Calculate first response and resolution deadlines.
+        // Find the active SLA policy matching this ticket's priority.
+        // Calculate first response and resolution deadlines.
         slaPolicyService.applyPolicyToTicket(savedTicket);
 
 
-// STEP 5.6: SAVE TICKET WITH SLA DEADLINES
+        // STEP 5.6: SAVE TICKET WITH SLA DEADLINES
 
         savedTicket = ticketRepository.save(savedTicket);
-        // STEP: RECORD TICKET CREATION ACTIVITY
+
+
+        // STEP 5.7: RECORD TICKET CREATION ACTIVITY
 
         activityService.recordActivity(
                 savedTicket,
@@ -125,7 +135,8 @@ public class TicketService {
                 ActivityVisibility.PUBLIC
         );
 
-        // STEP 5.5: CONVERT ENTITY INTO RESPONSE DTO
+
+        // STEP 5.8: CONVERT ENTITY INTO RESPONSE DTO
 
         return convertToResponse(savedTicket);
     }
@@ -137,15 +148,18 @@ public class TicketService {
     public List<TicketResponse> getEmployeeTickets(String employeeEmail) {
 
         // STEP 6.1: FIND LOGGED-IN EMPLOYEE
+
         User employee = findEnabledUserByEmail(employeeEmail);
 
 
         // STEP 6.2: FETCH EMPLOYEE'S TICKETS
+
         List<Ticket> tickets = ticketRepository
                 .findByCreatedBy_IdOrderByCreatedAtDesc(employee.getId());
 
 
         // STEP 6.3: CONVERT EACH TICKET TO RESPONSE DTO
+
         return tickets.stream()
                 .map(this::convertToResponse)
                 .toList();
@@ -161,10 +175,12 @@ public class TicketService {
     ) {
 
         // STEP 7.1: FIND LOGGED-IN EMPLOYEE
+
         User employee = findEnabledUserByEmail(employeeEmail);
 
 
         // STEP 7.2: FIND TICKET USING ID
+
         Ticket ticket = findTicketById(ticketId);
 
 
@@ -180,6 +196,7 @@ public class TicketService {
 
 
         // STEP 7.4: RETURN TICKET RESPONSE
+
         return convertToResponse(ticket);
     }
 
@@ -190,11 +207,13 @@ public class TicketService {
     public List<TicketResponse> getAllTickets() {
 
         // STEP 8.1: FETCH ALL TICKETS
+
         List<Ticket> tickets = ticketRepository
                 .findAllByOrderByCreatedAtDesc();
 
 
         // STEP 8.2: CONVERT ENTITIES INTO RESPONSE DTOs
+
         return tickets.stream()
                 .map(this::convertToResponse)
                 .toList();
@@ -207,11 +226,13 @@ public class TicketService {
     public List<TicketResponse> getUnassignedTickets() {
 
         // STEP 9.1: FETCH TICKETS WITHOUT AN ASSIGNED AGENT
+
         List<Ticket> tickets = ticketRepository
                 .findByAssignedToIsNullOrderByCreatedAtDesc();
 
 
         // STEP 9.2: CONVERT ENTITIES INTO RESPONSE DTOs
+
         return tickets.stream()
                 .map(this::convertToResponse)
                 .toList();
@@ -224,17 +245,17 @@ public class TicketService {
     public TicketResponse getTicket(Long ticketId) {
 
         // STEP 10.1: FIND TICKET
+
         Ticket ticket = findTicketById(ticketId);
 
 
         // STEP 10.2: RETURN RESPONSE DTO
+
         return convertToResponse(ticket);
     }
 
 
     // STEP 11: ASSIGN TICKET TO AN AGENT
-
-// STEP: ASSIGN TICKET TO AGENT AND RECORD ACTIVITY
 
     public TicketResponse assignTicket(
             Long ticketId,
@@ -242,11 +263,13 @@ public class TicketService {
             TicketAssignRequest request
     ) {
 
-        // STEP 1: FIND ADMIN WHO IS PERFORMING THE ASSIGNMENT
+        // STEP 11.1: FIND ADMIN WHO IS PERFORMING THE ASSIGNMENT
+
         User admin = findEnabledUserByEmail(adminEmail);
 
 
-        // STEP 2: VERIFY ADMIN ROLE
+        // STEP 11.2: VERIFY ADMIN ROLE
+
         if (admin.getRole() != Role.ADMIN) {
 
             throw new AccessDeniedException(
@@ -255,11 +278,13 @@ public class TicketService {
         }
 
 
-        // STEP 3: FIND TICKET
+        // STEP 11.3: FIND TICKET
+
         Ticket ticket = findTicketById(ticketId);
 
 
-        // STEP 4: FIND REQUESTED AGENT
+        // STEP 11.4: FIND REQUESTED AGENT
+
         User agent = userRepository
                 .findById(request.agentId())
                 .orElseThrow(() -> new ResourceNotFoundException(
@@ -267,7 +292,8 @@ public class TicketService {
                 ));
 
 
-        // STEP 5: VERIFY AGENT ROLE AND ACCOUNT STATUS
+        // STEP 11.5: VERIFY AGENT ROLE AND ACCOUNT STATUS
+
         if (agent.getRole() != Role.AGENT || !agent.isEnabled()) {
 
             throw new IllegalArgumentException(
@@ -276,19 +302,25 @@ public class TicketService {
         }
 
 
-        // STEP 6: STORE PREVIOUS ASSIGNED AGENT
+        // STEP 11.6: STORE PREVIOUS ASSIGNED AGENT
+
+        // We need this information to identify whether the ticket
+        // is being assigned for the first time or reassigned.
         User previousAgent = ticket.getAssignedTo();
 
 
-        // STEP 7: ASSIGN TICKET
+        // STEP 11.7: ASSIGN TICKET
+
         ticket.assignTo(agent);
 
 
-        // STEP 8: SAVE UPDATED TICKET
+        // STEP 11.8: SAVE UPDATED TICKET
+
         Ticket updatedTicket = ticketRepository.save(ticket);
 
 
-        // STEP 9: PREPARE ACTIVITY DESCRIPTION
+        // STEP 11.9: PREPARE ACTIVITY DESCRIPTION
+
         String description;
 
         if (previousAgent == null) {
@@ -304,7 +336,8 @@ public class TicketService {
         }
 
 
-        // STEP 10: RECORD ASSIGNMENT ACTIVITY
+        // STEP 11.10: RECORD ASSIGNMENT ACTIVITY
+
         activityService.recordActivity(
                 updatedTicket,
                 admin,
@@ -314,7 +347,18 @@ public class TicketService {
         );
 
 
-        // STEP 11: RETURN UPDATED TICKET
+        // STEP 11.11: SEND ASSIGNMENT NOTIFICATIONS
+
+        // Notify the new agent and employee.
+        // If this is a reassignment, also notify the previous agent.
+        notificationService.notifyTicketAssigned(
+                updatedTicket,
+                previousAgent
+        );
+
+
+        // STEP 11.12: RETURN UPDATED TICKET
+
         return convertToResponse(updatedTicket);
     }
 
@@ -329,10 +373,12 @@ public class TicketService {
     ) {
 
         // STEP 12.1: FIND THE LOGGED-IN USER
+
         User currentUser = findEnabledUserByEmail(currentUserEmail);
 
 
         // STEP 12.2: FIND TICKET
+
         Ticket ticket = findTicketById(ticketId);
 
 
@@ -359,20 +405,22 @@ public class TicketService {
 
         // STEP 12.4: STORE PREVIOUS STATUS
 
+        // We need the previous status for activity history
+        // and notification messages.
         TicketStatus previousStatus = ticket.getStatus();
 
 
-// STEP 12.5: UPDATE TICKET STATUS
+        // STEP 12.5: UPDATE TICKET STATUS
 
         ticket.updateStatus(request.status());
 
 
-// STEP 12.6: SAVE UPDATED TICKET
+        // STEP 12.6: SAVE UPDATED TICKET
 
         Ticket updatedTicket = ticketRepository.save(ticket);
 
 
-// STEP 12.7: PREPARE STATUS CHANGE DESCRIPTION
+        // STEP 12.7: PREPARE STATUS CHANGE DESCRIPTION
 
         String description = "Status changed from "
                 + previousStatus
@@ -380,7 +428,7 @@ public class TicketService {
                 + updatedTicket.getStatus();
 
 
-// STEP 12.8: RECORD STATUS CHANGE ACTIVITY
+        // STEP 12.8: RECORD STATUS CHANGE ACTIVITY
 
         activityService.recordActivity(
                 updatedTicket,
@@ -391,7 +439,19 @@ public class TicketService {
         );
 
 
-// STEP 12.9: RETURN UPDATED TICKET
+        // STEP 12.9: SEND STATUS CHANGE NOTIFICATIONS
+
+        // Notify the employee and assigned agent.
+        // The notification service avoids notifying the person
+        // who performed the status update.
+        notificationService.notifyTicketStatusChanged(
+                updatedTicket,
+                currentUser,
+                previousStatus
+        );
+
+
+        // STEP 12.10: RETURN UPDATED TICKET
 
         return convertToResponse(updatedTicket);
     }
@@ -427,14 +487,17 @@ public class TicketService {
     private TicketResponse convertToResponse(Ticket ticket) {
 
         // STEP 15.1: GET CATEGORY DETAILS
+
         Category category = ticket.getCategory();
 
 
         // STEP 15.2: GET EMPLOYEE DETAILS
+
         User employee = ticket.getCreatedBy();
 
 
         // STEP 15.3: GET ASSIGNED AGENT DETAILS
+
         User agent = ticket.getAssignedTo();
 
 
@@ -473,6 +536,7 @@ public class TicketService {
                 ticket.getUpdatedAt(),
 
                 ticket.getResolvedAt(),
+
                 ticket.getFirstResponseDueAt(),
 
                 ticket.getFirstRespondedAt(),

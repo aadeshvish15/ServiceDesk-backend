@@ -1,3 +1,4 @@
+
 package com.servicedesk.servicedesk_backend.comment;
 
 // STEP 1: IMPORT REQUIRED CLASSES
@@ -11,6 +12,8 @@ import com.servicedesk.servicedesk_backend.category.exception.ResourceNotFoundEx
 import com.servicedesk.servicedesk_backend.comment.dto.AgentCommentRequest;
 import com.servicedesk.servicedesk_backend.comment.dto.CommentResponse;
 import com.servicedesk.servicedesk_backend.comment.dto.PublicCommentRequest;
+
+import com.servicedesk.servicedesk_backend.notification.NotificationService;
 
 import com.servicedesk.servicedesk_backend.ticket.Ticket;
 import com.servicedesk.servicedesk_backend.ticket.TicketRepository;
@@ -43,6 +46,8 @@ public class CommentService {
 
     private final ActivityService activityService;
 
+    private final NotificationService notificationService;
+
 
     // STEP 4: CONSTRUCTOR INJECTION
 
@@ -50,13 +55,15 @@ public class CommentService {
             CommentRepository commentRepository,
             TicketRepository ticketRepository,
             UserRepository userRepository,
-            ActivityService activityService
+            ActivityService activityService,
+            NotificationService notificationService
     ) {
 
         this.commentRepository = commentRepository;
         this.ticketRepository = ticketRepository;
         this.userRepository = userRepository;
         this.activityService = activityService;
+        this.notificationService = notificationService;
     }
 
 
@@ -69,10 +76,12 @@ public class CommentService {
     ) {
 
         // STEP 5.1: FIND LOGGED-IN EMPLOYEE
+
         User employee = findEnabledUser(employeeEmail);
 
 
         // STEP 5.2: FIND REQUESTED TICKET
+
         Ticket ticket = findTicket(ticketId);
 
 
@@ -89,8 +98,10 @@ public class CommentService {
 
         // STEP 5.4: CREATE COMMENT
 
-        // IMPORTANT: Visibility is set by the backend.
+        // IMPORTANT:
+        // Visibility is controlled by the backend.
         // An employee cannot create an internal note.
+
         Comment comment = new Comment(
                 ticket,
                 employee,
@@ -100,6 +111,7 @@ public class CommentService {
 
 
         // STEP 5.5: SAVE COMMENT
+
         Comment savedComment = commentRepository.save(comment);
 
 
@@ -114,7 +126,21 @@ public class CommentService {
         );
 
 
-        // STEP 5.7: CONVERT AND RETURN RESPONSE
+        // STEP 5.7: SEND NOTIFICATION
+
+        // Notify the assigned agent about the employee's comment.
+        // If no agent is assigned, the notification service
+        // can notify active admins instead.
+
+        notificationService.notifyCommentAdded(
+                ticket,
+                employee,
+                true
+        );
+
+
+        // STEP 5.8: CONVERT AND RETURN RESPONSE
+
         return convertToResponse(savedComment);
     }
 
@@ -129,10 +155,12 @@ public class CommentService {
     ) {
 
         // STEP 6.1: FIND LOGGED-IN USER
+
         User currentUser = findEnabledUser(currentUserEmail);
 
 
         // STEP 6.2: FIND REQUESTED TICKET
+
         Ticket ticket = findTicket(ticketId);
 
 
@@ -147,6 +175,9 @@ public class CommentService {
 
         // STEP 6.4: CREATE COMMENT
 
+        // Visibility comes from the validated request.
+        // It can be PUBLIC or INTERNAL.
+
         Comment comment = new Comment(
                 ticket,
                 currentUser,
@@ -156,12 +187,14 @@ public class CommentService {
 
 
         // STEP 6.5: SAVE COMMENT
+
         Comment savedComment = commentRepository.save(comment);
 
 
         // STEP 6.6: DETERMINE ACTIVITY TYPE AND VISIBILITY
 
         ActivityAction action;
+
         ActivityVisibility activityVisibility;
 
         if (request.visibility() == CommentVisibility.INTERNAL) {
@@ -182,6 +215,7 @@ public class CommentService {
 
         // Internal notes generate internal activity events.
         // Public comments generate public activity events.
+
         activityService.recordActivity(
                 ticket,
                 currentUser,
@@ -192,22 +226,40 @@ public class CommentService {
                 activityVisibility
         );
 
-// STEP 6.8: CHECK WHETHER THIS IS A PUBLIC AGENT RESPONSE
 
-// Internal notes must not count as first responses.
-// Employee comments must not count as agent responses.
+        // STEP 6.8: SEND NOTIFICATION
+
+        // Notify the employee only when the agent/admin
+        // adds a PUBLIC comment.
+        //
+        // NotificationService checks the visibility.
+        // Internal notes will not generate employee notifications.
+
+        notificationService.notifyCommentAdded(
+                ticket,
+                currentUser,
+                request.visibility() == CommentVisibility.PUBLIC
+        );
+
+
+        // STEP 6.9: CHECK WHETHER THIS IS A PUBLIC AGENT RESPONSE
+
+        // Internal notes must not count as first responses.
+        // Employee comments must not count as agent responses.
+
         if (
                 request.visibility() == CommentVisibility.PUBLIC
                         && currentUser.getRole() != Role.EMPLOYEE
         ) {
 
-            // STEP 6.9: RECORD FIRST RESPONSE TIME
+            // STEP 6.10: RECORD FIRST RESPONSE TIME
 
             // This method returns true only for the first response.
             boolean firstResponseRecorded = ticket.recordFirstResponse();
 
 
-            // STEP 6.10: SAVE FIRST RESPONSE TIME AND ACTIVITY
+            // STEP 6.11: SAVE FIRST RESPONSE TIME AND ACTIVITY
+
             if (firstResponseRecorded) {
 
                 // Save actual first-response timestamp in tickets table.
@@ -224,7 +276,10 @@ public class CommentService {
                 );
             }
         }
-        // STEP 6.8: RETURN COMMENT RESPONSE
+
+
+        // STEP 6.12: CONVERT AND RETURN COMMENT RESPONSE
+
         return convertToResponse(savedComment);
     }
 
@@ -238,14 +293,17 @@ public class CommentService {
     ) {
 
         // STEP 7.1: FIND LOGGED-IN EMPLOYEE
+
         User employee = findEnabledUser(employeeEmail);
 
 
         // STEP 7.2: FIND TICKET
+
         Ticket ticket = findTicket(ticketId);
 
 
         // STEP 7.3: VERIFY TICKET OWNERSHIP
+
         if (!ticket.getCreatedBy().getId().equals(employee.getId())) {
 
             throw new AccessDeniedException(
@@ -256,6 +314,8 @@ public class CommentService {
 
         // STEP 7.4: FETCH ONLY PUBLIC COMMENTS
 
+        // Internal notes will never be returned to employees.
+
         List<Comment> comments = commentRepository
                 .findByTicket_IdAndVisibilityOrderByCreatedAtAsc(
                         ticketId,
@@ -264,6 +324,7 @@ public class CommentService {
 
 
         // STEP 7.5: CONVERT COMMENT ENTITIES INTO DTOs
+
         return comments.stream()
                 .map(this::convertToResponse)
                 .toList();
@@ -280,14 +341,17 @@ public class CommentService {
     ) {
 
         // STEP 8.1: FIND LOGGED-IN USER
+
         User currentUser = findEnabledUser(currentUserEmail);
 
 
         // STEP 8.2: FIND TICKET
+
         Ticket ticket = findTicket(ticketId);
 
 
         // STEP 8.3: VERIFY ACCESS
+
         verifyAgentAccess(
                 ticket,
                 currentUser,
@@ -296,11 +360,13 @@ public class CommentService {
 
 
         // STEP 8.4: FETCH PUBLIC AND INTERNAL COMMENTS
+
         List<Comment> comments = commentRepository
                 .findByTicket_IdOrderByCreatedAtAsc(ticketId);
 
 
         // STEP 8.5: CONVERT ENTITIES INTO DTOs
+
         return comments.stream()
                 .map(this::convertToResponse)
                 .toList();
@@ -391,10 +457,12 @@ public class CommentService {
     private CommentResponse convertToResponse(Comment comment) {
 
         // STEP 12.1: GET COMMENT AUTHOR
+
         User author = comment.getAuthor();
 
 
         // STEP 12.2: CREATE RESPONSE DTO
+
         return new CommentResponse(
 
                 comment.getId(),
